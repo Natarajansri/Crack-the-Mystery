@@ -588,6 +588,9 @@ class GameService {
       states[roomId] = state;
       this.saveRoomStates(states);
       this.broadcastUpdate(roomId, state);
+      if (supabaseAdapter.isAvailable()) {
+        supabaseAdapter.recordSubmissionAttempt(submission).catch(() => {});
+      }
       return { 
         success: false, 
         message: 'Incorrect answer. Read the prompt carefully and recheck your deduction!' 
@@ -613,6 +616,11 @@ class GameService {
     this.saveRoomStates(states);
 
     this.broadcastUpdate(roomId, state);
+
+    if (supabaseAdapter.isAvailable()) {
+      supabaseAdapter.recordClueProgress(progress, submission).catch(() => {});
+    }
+
     return {
       success: true,
       message: `Clue ${clue.clueNumber} solved! Fragment acquired: "${clue.expectedFragment}"`,
@@ -702,6 +710,9 @@ class GameService {
       states[roomId] = state;
       this.saveRoomStates(states);
       this.broadcastUpdate(roomId, state);
+      if (supabaseAdapter.isAvailable()) {
+        supabaseAdapter.recordSubmissionAttempt(submission).catch(() => {});
+      }
       return {
         success: false,
         message: 'Incorrect final combination. Review the fragment sequence in your vault!',
@@ -724,7 +735,7 @@ class GameService {
     // Check if clue 5 is also marked
     const clue5 = puzzle.clues.find((c) => c.clueNumber === 5);
     if (clue5) {
-      state.clueProgress[`${puzzleId}_${clue5.id}`] = {
+      const clue5Prog: ClueProgress = {
         id: `prog-${Date.now()}`,
         roomId,
         puzzleId,
@@ -736,6 +747,10 @@ class GameService {
         earnedFragment: puzzle.finalAnswer,
         solvedAt: new Date().toISOString(),
       };
+      state.clueProgress[`${puzzleId}_${clue5.id}`] = clue5Prog;
+      if (supabaseAdapter.isAvailable()) {
+        supabaseAdapter.recordClueProgress(clue5Prog, submission).catch(() => {});
+      }
     }
 
     // Check if ALL 15 puzzles are completed
@@ -762,6 +777,17 @@ class GameService {
     this.saveRoomStates(states);
 
     this.broadcastUpdate(roomId, state);
+
+    if (supabaseAdapter.isAvailable()) {
+      supabaseAdapter.recordPuzzleProgress(
+        puzzleProg, 
+        room.currentPuzzleNumber, 
+        submission, 
+        allCompleted, 
+        room.completedAt
+      ).catch(() => {});
+    }
+
     return {
       success: true,
       message: `PUZZLE ${puzzle.puzzleNumber} SOLVED! Master Keyword: ${puzzle.finalAnswer}`,
@@ -781,18 +807,13 @@ class GameService {
         const localStates = this.loadRoomStates();
         for (const rd of supaRoomsData) {
           localRooms[rd.room.id] = rd.room;
-          if (!localStates[rd.room.id]) {
-            localStates[rd.room.id] = {
-              room: rd.room,
-              members: rd.members,
-              clueProgress: {},
-              puzzleProgress: {},
-              submissions: [],
-            };
-          } else {
-            localStates[rd.room.id].room = rd.room;
-            localStates[rd.room.id].members = rd.members;
-          }
+          localStates[rd.room.id] = {
+            room: rd.room,
+            members: rd.members,
+            clueProgress: rd.clueProgress || (localStates[rd.room.id]?.clueProgress) || {},
+            puzzleProgress: rd.puzzleProgress || (localStates[rd.room.id]?.puzzleProgress) || {},
+            submissions: (localStates[rd.room.id]?.submissions) || [],
+          };
         }
         this.saveStoredRooms(localRooms);
         this.saveRoomStates(localStates);

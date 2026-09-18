@@ -282,7 +282,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExit }) => {
       </div>
 
       {/* KPI Metrics Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 sm:gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
         <div className="cyber-card rounded-xl p-4">
           <div className="text-[10px] text-slate-400 uppercase font-semibold">Total Rooms</div>
           <div className="text-2xl font-display font-black text-white mt-1">{stats.totalRooms}</div>
@@ -299,13 +299,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExit }) => {
         </div>
 
         <div className="cyber-card rounded-xl p-4">
-          <div className="text-[10px] text-slate-400 uppercase font-semibold">Completed Rooms</div>
-          <div className="text-2xl font-display font-black text-cyber-gold mt-1">{stats.completedRooms}</div>
+          <div className="text-[10px] text-slate-400 uppercase font-semibold">Puzzles Solved</div>
+          <div className="text-2xl font-display font-black text-emerald-400 mt-1">{stats.totalPuzzlesSolved}</div>
         </div>
 
-        <div className="cyber-card rounded-xl p-4 col-span-2 sm:col-span-1">
+        <div className="cyber-card rounded-xl p-4">
           <div className="text-[10px] text-slate-400 uppercase font-semibold">Clues Solved</div>
           <div className="text-2xl font-display font-black text-cyber-purple mt-1">{stats.totalCluesSolved}</div>
+        </div>
+
+        <div className="cyber-card rounded-xl p-4">
+          <div className="text-[10px] text-slate-400 uppercase font-semibold">Completed Rooms</div>
+          <div className="text-2xl font-display font-black text-cyber-gold mt-1">{stats.completedRooms}</div>
         </div>
       </div>
 

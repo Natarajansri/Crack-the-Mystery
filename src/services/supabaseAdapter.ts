@@ -557,6 +557,34 @@ export class SupabaseAdapter {
         const cluesSolvedCount = (r.clue_progress || []).filter((c: any) => c.is_solved).length;
         const isFinished = puzzlesSolvedCount >= 15 || r.status === 'completed';
 
+        const clueProgress: Record<string, ClueProgress> = {};
+        (r.clue_progress || []).forEach((c: any) => {
+          clueProgress[`${c.puzzle_id}_${c.clue_id}`] = {
+            id: c.id,
+            roomId: c.room_id,
+            puzzleId: c.puzzle_id,
+            clueId: c.clue_id,
+            clueNumber: c.clue_number,
+            isSolved: c.is_solved,
+            solvedByParticipantId: c.solved_by_participant_id,
+            earnedFragment: c.earned_fragment,
+            solvedAt: c.solved_at,
+          };
+        });
+
+        const puzzleProgress: Record<string, PuzzleProgress> = {};
+        (r.puzzle_progress || []).forEach((p: any) => {
+          puzzleProgress[p.puzzle_id] = {
+            id: p.id,
+            roomId: p.room_id,
+            puzzleId: p.puzzle_id,
+            puzzleNumber: p.puzzle_number,
+            isCompleted: p.is_completed,
+            completedByParticipantId: p.completed_by_participant_id,
+            completedAt: p.completed_at,
+          };
+        });
+
         let finishedAt: string | undefined = undefined;
         if (isFinished) {
           const p15 = completedPuzzles.find((p: any) => p.puzzle_number === 15 || p.puzzle_id === 'puz-15');
@@ -575,6 +603,8 @@ export class SupabaseAdapter {
         return {
           room,
           members,
+          clueProgress,
+          puzzleProgress,
           puzzlesSolvedCount,
           cluesSolvedCount,
           lastActive: r.updated_at || r.created_at,
@@ -585,6 +615,122 @@ export class SupabaseAdapter {
     } catch (e) {
       console.error('[Supabase getAllRoomsData Exception]:', e);
       return [];
+    }
+  }
+
+  /**
+   * Persist a Clue Progress solve to Supabase
+   */
+  public async recordClueProgress(progress: ClueProgress, submission?: AnswerSubmission): Promise<boolean> {
+    if (!this.isAvailable() || !supabase) return false;
+    try {
+      const validParticipantId = progress.solvedByParticipantId ? ensureUUID(progress.solvedByParticipantId) : null;
+      
+      const { error: clueErr } = await supabase.from('clue_progress').upsert({
+        room_id: progress.roomId,
+        puzzle_id: progress.puzzleId,
+        clue_id: progress.clueId,
+        clue_number: progress.clueNumber,
+        is_solved: true,
+        solved_by_participant_id: validParticipantId,
+        earned_fragment: progress.earnedFragment,
+        solved_at: progress.solvedAt || new Date().toISOString(),
+      }, { onConflict: 'room_id,puzzle_id,clue_id' });
+
+      if (clueErr) {
+        console.warn('[Supabase recordClueProgress Error]:', clueErr);
+      }
+
+      if (submission) {
+        await this.recordSubmissionAttempt(submission);
+      }
+
+      await supabase
+        .from('rooms')
+        .update({ updated_at: new Date().toISOString() })
+        .eq('id', progress.roomId);
+
+      return true;
+    } catch (e) {
+      console.error('[Supabase recordClueProgress Exception]:', e);
+      return false;
+    }
+  }
+
+  /**
+   * Persist a Main Puzzle completion to Supabase
+   */
+  public async recordPuzzleProgress(
+    puzzleProg: PuzzleProgress, 
+    currentPuzzleNumber: number, 
+    submission?: AnswerSubmission,
+    isRoomCompleted: boolean = false,
+    completedAt?: string
+  ): Promise<boolean> {
+    if (!this.isAvailable() || !supabase) return false;
+    try {
+      const validParticipantId = puzzleProg.completedByParticipantId ? ensureUUID(puzzleProg.completedByParticipantId) : null;
+      
+      const { error: puzErr } = await supabase.from('puzzle_progress').upsert({
+        room_id: puzzleProg.roomId,
+        puzzle_id: puzzleProg.puzzleId,
+        puzzle_number: puzzleProg.puzzleNumber,
+        is_completed: true,
+        completed_by_participant_id: validParticipantId,
+        completed_at: puzzleProg.completedAt || new Date().toISOString(),
+      }, { onConflict: 'room_id,puzzle_id' });
+
+      if (puzErr) {
+        console.warn('[Supabase recordPuzzleProgress Error]:', puzErr);
+      }
+
+      if (submission) {
+        await this.recordSubmissionAttempt(submission);
+      }
+
+      const updatePayload: any = {
+        current_puzzle_number: currentPuzzleNumber,
+        updated_at: new Date().toISOString(),
+      };
+
+      if (isRoomCompleted) {
+        updatePayload.status = 'completed';
+      }
+
+      await supabase
+        .from('rooms')
+        .update(updatePayload)
+        .eq('id', puzzleProg.roomId);
+
+      return true;
+    } catch (e) {
+      console.error('[Supabase recordPuzzleProgress Exception]:', e);
+      return false;
+    }
+  }
+
+  /**
+   * Record an answer submission attempt to Supabase
+   */
+  public async recordSubmissionAttempt(submission: AnswerSubmission): Promise<boolean> {
+    if (!this.isAvailable() || !supabase) return false;
+    try {
+      const validParticipantId = ensureUUID(submission.submittedByParticipantId);
+      await supabase.from('submissions').insert({
+        room_id: submission.roomId,
+        puzzle_id: submission.puzzleId,
+        clue_id: submission.clueId || null,
+        clue_number: submission.clueNumber || null,
+        submitted_by_participant_id: validParticipantId,
+        submission_type: submission.submissionType,
+        answer_text: submission.answerText,
+        is_correct: submission.isCorrect,
+        submitted_at: submission.timestamp || new Date().toISOString(),
+      });
+      return true;
+    } catch (e) {
+      console.warn('[Supabase recordSubmissionAttempt Warning]:', e);
+      return false;
     }
   }
 

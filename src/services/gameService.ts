@@ -6,7 +6,8 @@ import {
   ClueProgress, 
   PuzzleProgress, 
   AnswerSubmission,
-  AdminStats
+  AdminStats,
+  RoomSummaryData
 } from '../types';
 import { PUZZLES_DATA } from '../data/puzzlesData';
 import { normalizeAnswer, generateRoomCode, ensureUUID } from '../utils/answerUtils';
@@ -734,8 +735,11 @@ class GameService {
     const allCompleted = completedCount >= PUZZLES_DATA.length;
 
     if (allCompleted) {
+      const nowIso = new Date().toISOString();
       room.status = 'completed';
+      room.completedAt = nowIso;
       state.room.status = 'completed';
+      state.room.completedAt = nowIso;
     }
 
     // Advance room's active puzzle pointer if this was current
@@ -851,21 +855,16 @@ class GameService {
     };
   }
 
-  public getAllRoomsData(): Array<{
-    room: Room;
-    members: RoomMember[];
-    puzzlesSolvedCount: number;
-    cluesSolvedCount: number;
-    lastActive: string;
-  }> {
+  public getAllRoomsData(): RoomSummaryData[] {
     const rooms = Object.values(this.loadStoredRooms());
     const states = this.loadRoomStates();
 
-    return rooms.map((room) => {
+    const rawList: RoomSummaryData[] = rooms.map((room) => {
       const state = states[room.id];
-      const puzzlesSolvedCount = state 
-        ? Object.values(state.puzzleProgress).filter((p) => p.isCompleted).length 
-        : 0;
+      const completedPuzzles = state 
+        ? Object.values(state.puzzleProgress).filter((p) => p.isCompleted)
+        : [];
+      const puzzlesSolvedCount = completedPuzzles.length;
       const cluesSolvedCount = state 
         ? Object.values(state.clueProgress).filter((c) => c.isSolved).length 
         : 0;
@@ -873,14 +872,81 @@ class GameService {
       const lastSub = state?.submissions[state.submissions.length - 1];
       const lastActive = lastSub ? lastSub.timestamp : room.updatedAt || room.createdAt;
 
+      const isFinished = puzzlesSolvedCount >= PUZZLES_DATA.length || room.status === 'completed';
+      let finishedAt: string | undefined = room.completedAt;
+
+      if (isFinished) {
+        if (!finishedAt) {
+          const p15 = completedPuzzles.find((p) => p.puzzleNumber === 15 || p.puzzleId === 'puz-15');
+          if (p15 && p15.completedAt) {
+            finishedAt = p15.completedAt;
+          } else {
+            const dates = completedPuzzles
+              .map((p) => p.completedAt)
+              .filter(Boolean)
+              .sort();
+            finishedAt = dates[dates.length - 1] || lastActive;
+          }
+        }
+      }
+
+      let durationMs: number | undefined = undefined;
+      let formattedDuration: string | undefined = undefined;
+
+      if (finishedAt && room.createdAt) {
+        durationMs = Math.max(0, new Date(finishedAt).getTime() - new Date(room.createdAt).getTime());
+        const totalSeconds = Math.floor(durationMs / 1000);
+        const hours = Math.floor(totalSeconds / 3600);
+        const mins = Math.floor((totalSeconds % 3600) / 60);
+        const secs = totalSeconds % 60;
+        formattedDuration = hours > 0 ? `${hours}h ${mins}m ${secs}s` : `${mins}m ${secs}s`;
+      }
+
       return {
         room,
         members: state ? state.members : [],
         puzzlesSolvedCount,
         cluesSolvedCount,
         lastActive,
+        finishedAt,
+        durationMs,
+        formattedDuration,
+        isFinished,
       };
     });
+
+    // Rank: Finished teams sorted by earliest finishedAt, then in-progress by puzzles/clues/activity
+    rawList.sort((a, b) => {
+      const aFin = !!a.isFinished;
+      const bFin = !!b.isFinished;
+
+      if (aFin && !bFin) return -1;
+      if (!aFin && bFin) return 1;
+
+      if (aFin && bFin) {
+        const aTime = a.finishedAt ? new Date(a.finishedAt).getTime() : new Date(a.lastActive).getTime();
+        const bTime = b.finishedAt ? new Date(b.finishedAt).getTime() : new Date(b.lastActive).getTime();
+        if (aTime !== bTime) return aTime - bTime;
+      }
+
+      if (b.puzzlesSolvedCount !== a.puzzlesSolvedCount) {
+        return b.puzzlesSolvedCount - a.puzzlesSolvedCount;
+      }
+      if (b.cluesSolvedCount !== a.cluesSolvedCount) {
+        return b.cluesSolvedCount - a.cluesSolvedCount;
+      }
+
+      const aActive = new Date(a.lastActive).getTime();
+      const bActive = new Date(b.lastActive).getTime();
+      if (aActive !== bActive) return aActive - bActive;
+
+      return a.room.teamName.localeCompare(b.room.teamName);
+    });
+
+    return rawList.map((item, index) => ({
+      ...item,
+      rank: index + 1,
+    }));
   }
 
   public adminToggleLockRoom(roomId: string, lock: boolean): boolean {
@@ -916,7 +982,9 @@ class GameService {
     room.status = 'in_progress';
     room.currentPuzzleNumber = 1;
     room.updatedAt = new Date().toISOString();
+    delete room.completedAt;
     state.room = room;
+    delete state.room.completedAt;
     state.clueProgress = {};
     state.puzzleProgress = {};
     state.submissions = [];
@@ -933,6 +1001,7 @@ class GameService {
   public generateLeaderboardCSV(): string {
     const roomsData = this.getAllRoomsData();
     const headers = [
+      'Rank',
       'Room Code',
       'Team Name',
       'Status',
@@ -940,11 +1009,14 @@ class GameService {
       'Member Names',
       'Puzzles Solved (out of 15)',
       'Clues Solved (out of 75)',
+      'Finish Time (IST/UTC)',
+      'Total Duration',
       'Created At',
       'Last Active'
     ];
 
     const rows = roomsData.map((d) => [
+      d.rank || '',
       `"${d.room.code}"`,
       `"${d.room.teamName.replace(/"/g, '""')}"`,
       `"${d.room.status}"`,
@@ -952,6 +1024,8 @@ class GameService {
       `"${d.members.map((m) => m.participant.name).join(', ').replace(/"/g, '""')}"`,
       d.puzzlesSolvedCount,
       d.cluesSolvedCount,
+      `"${d.finishedAt || 'In Progress'}"`,
+      `"${d.formattedDuration || 'N/A'}"`,
       `"${d.room.createdAt}"`,
       `"${d.lastActive}"`
     ]);

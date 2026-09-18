@@ -551,8 +551,25 @@ export class SupabaseAdapter {
           isReady: m.is_ready,
         }));
 
-        const puzzlesSolvedCount = (r.puzzle_progress || []).filter((p: any) => p.is_completed).length;
+        const completedPuzzles = (r.puzzle_progress || []).filter((p: any) => p.is_completed);
+        const puzzlesSolvedCount = completedPuzzles.length;
         const cluesSolvedCount = (r.clue_progress || []).filter((c: any) => c.is_solved).length;
+        const isFinished = puzzlesSolvedCount >= 15 || r.status === 'completed';
+
+        let finishedAt: string | undefined = undefined;
+        if (isFinished) {
+          const p15 = completedPuzzles.find((p: any) => p.puzzle_number === 15 || p.puzzle_id === 'puz-15');
+          if (p15 && p15.completed_at) {
+            finishedAt = p15.completed_at;
+          } else {
+            const dates = completedPuzzles
+              .map((p: any) => p.completed_at)
+              .filter(Boolean)
+              .sort();
+            finishedAt = dates[dates.length - 1] || r.updated_at || r.created_at;
+          }
+          room.completedAt = finishedAt;
+        }
 
         return {
           room,
@@ -560,6 +577,8 @@ export class SupabaseAdapter {
           puzzlesSolvedCount,
           cluesSolvedCount,
           lastActive: r.updated_at || r.created_at,
+          finishedAt,
+          isFinished,
         };
       });
     } catch (e) {

@@ -1,21 +1,21 @@
 import React, { useState } from 'react';
-import { 
-  Database, 
-  CheckCircle2, 
-  AlertCircle, 
-  Copy, 
-  Check, 
-  ExternalLink, 
-  X, 
+import {
+  Database,
+  CheckCircle2,
+  AlertCircle,
+  Copy,
+  Check,
+  ExternalLink,
+  X,
   Sparkles,
   Server,
   Zap
 } from 'lucide-react';
-import { 
-  isSupabaseConfigured, 
-  currentSupabaseUrl, 
-  currentSupabaseAnonKey, 
-  setRuntimeSupabaseCredentials 
+import {
+  isSupabaseConfigured,
+  currentSupabaseUrl,
+  currentSupabaseAnonKey,
+  setRuntimeSupabaseCredentials
 } from '../services/supabase';
 import { soundService } from '../services/audioService';
 
@@ -194,9 +194,8 @@ CREATE POLICY "allow_all_submissions" ON public.submissions FOR ALL USING (true)
           <div>
             <h3 className="text-lg font-bold font-display uppercase tracking-wide text-white flex items-center gap-2">
               <span>Connect Cloud Database</span>
-              <span className={`text-[10px] px-2 py-0.5 rounded-full font-sans font-bold uppercase tracking-wider ${
-                isSupabaseConfigured ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-              }`}>
+              <span className={`text-[10px] px-2 py-0.5 rounded-full font-sans font-bold uppercase tracking-wider ${isSupabaseConfigured ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                }`}>
                 {isSupabaseConfigured ? 'Connected' : 'Setup Required'}
               </span>
             </h3>
@@ -262,11 +261,10 @@ CREATE POLICY "allow_all_submissions" ON public.submissions FOR ALL USING (true)
           </div>
 
           {statusMsg && (
-            <div className={`p-3 rounded-lg text-xs flex items-center gap-2 ${
-              statusMsg.isError 
-                ? 'bg-rose-500/10 border border-rose-500/30 text-rose-300' 
+            <div className={`p-3 rounded-lg text-xs flex items-center gap-2 ${statusMsg.isError
+                ? 'bg-rose-500/10 border border-rose-500/30 text-rose-300'
                 : 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-300'
-            }`}>
+              }`}>
               {statusMsg.isError ? <AlertCircle className="w-4 h-4 flex-shrink-0" /> : <CheckCircle2 className="w-4 h-4 flex-shrink-0" />}
               <span>{statusMsg.text}</span>
             </div>

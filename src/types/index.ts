@@ -24,6 +24,7 @@ export interface Room {
   currentPuzzleNumber: number;
   createdAt: string;
   updatedAt: string;
+  completedAt?: string;
 }
 
 export interface RoomMember {
@@ -129,4 +130,17 @@ export interface AdminStats {
   completedRooms: number;
   totalCluesSolved: number;
   totalPuzzlesSolved: number;
+}
+
+export interface RoomSummaryData {
+  room: Room;
+  members: RoomMember[];
+  puzzlesSolvedCount: number;
+  cluesSolvedCount: number;
+  lastActive: string;
+  finishedAt?: string;
+  durationMs?: number;
+  formattedDuration?: string;
+  rank?: number;
+  isFinished?: boolean;
 }

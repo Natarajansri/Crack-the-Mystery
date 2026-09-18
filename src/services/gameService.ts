@@ -9,7 +9,7 @@ import {
   AdminStats
 } from '../types';
 import { PUZZLES_DATA } from '../data/puzzlesData';
-import { normalizeAnswer, generateRoomCode } from '../utils/answerUtils';
+import { normalizeAnswer, generateRoomCode, ensureUUID } from '../utils/answerUtils';
 import { cloudSync } from './cloudSync';
 import { supabaseAdapter } from './supabaseAdapter';
 
@@ -249,11 +249,13 @@ class GameService {
     leader: Participant, 
     maxCapacity: number = 3
   ): Promise<{ room: Room; state: RoomState }> {
+    leader.id = ensureUUID(leader.id);
+
     // 1. If Supabase is connected, use Supabase for real-time multiplayer
     if (supabaseAdapter.isAvailable()) {
       try {
         const supaRes = await supabaseAdapter.createRoom(teamName, leader, maxCapacity);
-        if (supaRes) {
+        if (supaRes.success && supaRes.room && supaRes.state) {
           const rooms = this.loadStoredRooms();
           rooms[supaRes.room.id] = supaRes.room;
           this.saveStoredRooms(rooms);
@@ -263,7 +265,9 @@ class GameService {
           this.saveRoomStates(states);
 
           this.broadcastUpdate(supaRes.room.id, supaRes.state);
-          return supaRes;
+          return { room: supaRes.room, state: supaRes.state };
+        } else if (!supaRes.success && supaRes.error) {
+          console.error('[createRoom] Supabase error:', supaRes.error);
         }
       } catch (e) {
         console.warn('Supabase createRoom fallback to local:', e);
@@ -271,7 +275,7 @@ class GameService {
     }
 
     const code = generateRoomCode();
-    const roomId = `room-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const roomId = ensureUUID();
     const now = new Date().toISOString();
 
     const room: Room = {
@@ -287,7 +291,7 @@ class GameService {
     };
 
     const leaderMember: RoomMember = {
-      id: `member-${Date.now()}`,
+      id: ensureUUID(),
       roomId,
       participantId: leader.id,
       participant: leader,
@@ -325,6 +329,7 @@ class GameService {
     participant: Participant
   ): Promise<{ success: boolean; room?: Room; state?: RoomState; error?: string }> {
     const cleanCode = roomCode.trim().toUpperCase();
+    participant.id = ensureUUID(participant.id);
 
     // 1. If Supabase is connected, join directly via Supabase
     if (supabaseAdapter.isAvailable()) {
@@ -406,7 +411,7 @@ class GameService {
 
     // Add new member
     const newMember: RoomMember = {
-      id: `member-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      id: ensureUUID(),
       roomId: foundRoom.id,
       participantId: participant.id,
       participant,

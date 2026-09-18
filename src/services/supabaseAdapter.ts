@@ -6,11 +6,10 @@ import {
   RoomState, 
   ClueProgress, 
   PuzzleProgress, 
-  AnswerSubmission,
-  AdminStats 
+  AnswerSubmission 
 } from '../types';
 import { PUZZLES_DATA } from '../data/puzzlesData';
-import { normalizeAnswer, generateRoomCode } from '../utils/answerUtils';
+import { normalizeAnswer, generateRoomCode, ensureUUID } from '../utils/answerUtils';
 
 export class SupabaseAdapter {
   public isAvailable(): boolean {
@@ -18,48 +17,74 @@ export class SupabaseAdapter {
   }
 
   /**
-   * Save or upsert participant profile
+   * Save or upsert participant profile with verified UUID
    */
-  public async upsertParticipant(participant: Participant): Promise<void> {
-    if (!this.isAvailable() || !supabase) return;
-    try {
-      await supabase.from('participants').upsert({
-        id: participant.id,
-        name: participant.name,
-        email: participant.email,
-        register_number: participant.registerNumber,
-        department: participant.department,
-        college: participant.college,
-        avatar_seed: participant.avatarSeed,
-      });
-    } catch (e) {
-      console.warn('Failed to upsert participant to Supabase:', e);
+  public async upsertParticipant(participant: Participant): Promise<string> {
+    if (!this.isAvailable() || !supabase) {
+      return participant.id;
     }
+
+    const validId = ensureUUID(participant.id);
+    participant.id = validId;
+
+    try {
+      console.log('[Supabase] Upserting participant:', { id: validId, name: participant.name });
+      const { error } = await supabase.from('participants').upsert({
+        id: validId,
+        name: participant.name.trim(),
+        email: participant.email.trim(),
+        register_number: participant.registerNumber.trim().toUpperCase(),
+        department: participant.department.trim(),
+        college: participant.college.trim() || 'Ramco Institute of Technology',
+        avatar_seed: participant.avatarSeed || participant.name.trim().toLowerCase().replace(/\s+/g, '-'),
+      });
+
+      if (error) {
+        console.error('[Supabase upsertParticipant Error]:', error);
+      } else {
+        console.log('[Supabase] Participant upserted successfully:', validId);
+      }
+    } catch (e) {
+      console.error('[Supabase upsertParticipant Exception]:', e);
+    }
+
+    return validId;
   }
 
   /**
-   * Create a new Escape Room
+   * Create a new Escape Room in Supabase
    */
   public async createRoom(
     teamName: string, 
     leader: Participant, 
     maxCapacity: number = 3
-  ): Promise<{ room: Room; state: RoomState } | null> {
-    if (!this.isAvailable() || !supabase) return null;
+  ): Promise<{ success: boolean; room?: Room; state?: RoomState; error?: string }> {
+    if (!this.isAvailable() || !supabase) {
+      return { success: false, error: 'Database is not connected.' };
+    }
 
     try {
-      await this.upsertParticipant(leader);
+      // 1. Ensure leader is inserted with valid UUID
+      const leaderId = await this.upsertParticipant(leader);
+      leader.id = leaderId;
 
       const code = generateRoomCode();
-      const now = new Date().toISOString();
       const cap = Math.min(Math.max(maxCapacity, 1), 3);
 
+      console.log('[Supabase] Inserting room into public.rooms:', {
+        code,
+        team_name: teamName.trim(),
+        leader_id: leaderId,
+        max_capacity: cap,
+      });
+
+      // 2. Insert room
       const { data: roomData, error: roomError } = await supabase
         .from('rooms')
         .insert({
           code,
           team_name: teamName.trim(),
-          leader_id: leader.id,
+          leader_id: leaderId,
           max_capacity: cap,
           status: 'lobby',
           current_puzzle_number: 1,
@@ -68,18 +93,22 @@ export class SupabaseAdapter {
         .single();
 
       if (roomError || !roomData) {
-        console.error('Supabase create room error:', roomError);
-        return null;
+        console.error('[Supabase createRoom Error]:', roomError);
+        return { 
+          success: false, 
+          error: `Failed to insert room into database: ${roomError?.message || 'Unknown database error'}` 
+        };
       }
 
+      console.log('[Supabase] Room inserted successfully into public.rooms:', roomData);
       const roomId = roomData.id;
 
-      // Insert leader as member
+      // 3. Insert leader into room_members
       const { data: memberData, error: memberError } = await supabase
         .from('room_members')
         .insert({
           room_id: roomId,
-          participant_id: leader.id,
+          participant_id: leaderId,
           is_online: true,
           is_ready: true,
         })
@@ -87,9 +116,14 @@ export class SupabaseAdapter {
         .single();
 
       if (memberError || !memberData) {
-        console.error('Supabase add leader error:', memberError);
-        return null;
+        console.error('[Supabase addLeaderMember Error]:', memberError);
+        return { 
+          success: false, 
+          error: `Room created but failed to attach leader member: ${memberError?.message || 'Member insert error'}` 
+        };
       }
+
+      console.log('[Supabase] Leader member attached successfully:', memberData);
 
       const room: Room = {
         id: roomId,
@@ -106,7 +140,7 @@ export class SupabaseAdapter {
       const leaderMember: RoomMember = {
         id: memberData.id,
         roomId,
-        participantId: leader.id,
+        participantId: leaderId,
         participant: leader,
         joinedAt: memberData.joined_at,
         isOnline: true,
@@ -121,10 +155,13 @@ export class SupabaseAdapter {
         submissions: [],
       };
 
-      return { room, state };
-    } catch (err) {
-      console.error('Supabase createRoom exception:', err);
-      return null;
+      return { success: true, room, state };
+    } catch (err: any) {
+      console.error('[Supabase createRoom Exception]:', err);
+      return { 
+        success: false, 
+        error: `Supabase Exception: ${err?.message || 'Unexpected database error'}` 
+      };
     }
   }
 
@@ -136,32 +173,48 @@ export class SupabaseAdapter {
     participant: Participant
   ): Promise<{ success: boolean; room?: Room; state?: RoomState; error?: string }> {
     if (!this.isAvailable() || !supabase) {
-      return { success: false, error: 'Database not connected' };
+      return { success: false, error: 'Database is not connected.' };
     }
 
     try {
       const cleanCode = roomCode.trim().toUpperCase();
+      console.log('[Supabase] Looking up room with code:', cleanCode);
 
-      // 1. Look up room
+      // 1. Look up room in public.rooms
       const { data: roomData, error: roomError } = await supabase
         .from('rooms')
         .select('*')
         .eq('code', cleanCode)
         .maybeSingle();
 
-      if (roomError || !roomData) {
+      if (roomError) {
+        console.error('[Supabase joinRoom Lookup Error]:', roomError);
+        return { success: false, error: `Database error querying room: ${roomError.message}` };
+      }
+
+      if (!roomData) {
+        console.warn(`[Supabase joinRoom] No room found matching code: "${cleanCode}"`);
         return { success: false, error: 'Room code not found. Please check and try again.' };
       }
+
+      console.log('[Supabase] Room found:', roomData);
 
       if (roomData.status === 'locked') {
         return { success: false, error: 'This room is currently locked by the administrator.' };
       }
 
-      // 2. Fetch members
-      const { data: membersData } = await supabase
+      // 2. Fetch current room members
+      const { data: membersData, error: membersError } = await supabase
         .from('room_members')
         .select('*, participant:participants(*)')
         .eq('room_id', roomData.id);
+
+      if (membersError) {
+        console.error('[Supabase joinRoom Members Error]:', membersError);
+      }
+
+      const participantId = await this.upsertParticipant(participant);
+      participant.id = participantId;
 
       const currentMembers: RoomMember[] = (membersData || []).map((m: any) => ({
         id: m.id,
@@ -183,9 +236,10 @@ export class SupabaseAdapter {
         isReady: m.is_ready,
       }));
 
-      // Check if participant already in room
-      const existing = currentMembers.find((m) => m.participantId === participant.id);
+      // Check if participant is already in room (rejoining)
+      const existing = currentMembers.find((m) => m.participantId === participantId);
       if (existing) {
+        console.log('[Supabase] Participant rejoining existing room:', existing.id);
         await supabase
           .from('room_members')
           .update({ is_online: true })
@@ -196,23 +250,26 @@ export class SupabaseAdapter {
         return { success: true, room: fullState?.room || undefined, state: fullState || undefined };
       }
 
-      // Check capacity limit (capped at 3 members)
+      // Check capacity limit (strictly max 3 members)
       if (currentMembers.length >= roomData.max_capacity) {
+        console.warn(`[Supabase] Room ${cleanCode} is at full capacity: ${currentMembers.length}/${roomData.max_capacity}`);
         return { 
           success: false, 
           error: `Room is full. Maximum capacity is ${roomData.max_capacity} members.` 
         };
       }
 
-      // Insert participant
-      await this.upsertParticipant(participant);
+      // 3. Insert new member into room_members
+      console.log('[Supabase] Inserting new member into room_members:', {
+        room_id: roomData.id,
+        participant_id: participantId,
+      });
 
-      // Insert member
       const { data: newMemData, error: joinErr } = await supabase
         .from('room_members')
         .insert({
           room_id: roomData.id,
-          participant_id: participant.id,
+          participant_id: participantId,
           is_online: true,
           is_ready: false,
         })
@@ -220,8 +277,11 @@ export class SupabaseAdapter {
         .single();
 
       if (joinErr || !newMemData) {
-        return { success: false, error: 'Could not join room. Please try again.' };
+        console.error('[Supabase joinRoom Insert Member Error]:', joinErr);
+        return { success: false, error: `Could not join room: ${joinErr?.message || 'Member insert failed'}` };
       }
+
+      console.log('[Supabase] Member joined room successfully:', newMemData);
 
       const fullState = await this.fetchFullRoomState(roomData.id);
       return { 
@@ -230,6 +290,7 @@ export class SupabaseAdapter {
         state: fullState || undefined 
       };
     } catch (err: any) {
+      console.error('[Supabase joinRoom Exception]:', err);
       return { success: false, error: err.message || 'Database error joining room.' };
     }
   }
@@ -344,7 +405,7 @@ export class SupabaseAdapter {
         submissions,
       };
     } catch (e) {
-      console.error('fetchFullRoomState error:', e);
+      console.error('[Supabase fetchFullRoomState Exception]:', e);
       return null;
     }
   }
@@ -357,26 +418,35 @@ export class SupabaseAdapter {
       return () => {};
     }
 
+    console.log('[Supabase] Subscribing to Realtime channel for room:', roomId);
+
     const channel = supabase.channel(`realtime_room_${roomId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms', filter: `id=eq.${roomId}` }, async () => {
+        console.log('[Supabase Realtime] Rooms table changed for room:', roomId);
         const state = await this.fetchFullRoomState(roomId);
         if (state) onUpdate(state);
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'room_members', filter: `room_id=eq.${roomId}` }, async () => {
+        console.log('[Supabase Realtime] Room members table changed for room:', roomId);
         const state = await this.fetchFullRoomState(roomId);
         if (state) onUpdate(state);
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'clue_progress', filter: `room_id=eq.${roomId}` }, async () => {
+        console.log('[Supabase Realtime] Clue progress changed for room:', roomId);
         const state = await this.fetchFullRoomState(roomId);
         if (state) onUpdate(state);
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'puzzle_progress', filter: `room_id=eq.${roomId}` }, async () => {
+        console.log('[Supabase Realtime] Puzzle progress changed for room:', roomId);
         const state = await this.fetchFullRoomState(roomId);
         if (state) onUpdate(state);
       })
-      .subscribe();
+      .subscribe((status) => {
+        console.log(`[Supabase Realtime Channel Status for ${roomId}]:`, status);
+      });
 
     return () => {
+      console.log('[Supabase] Unsubscribing from Realtime channel for room:', roomId);
       supabase?.removeChannel(channel);
     };
   }
@@ -423,7 +493,7 @@ export class SupabaseAdapter {
   public async getAllRoomsData(): Promise<any[]> {
     if (!this.isAvailable() || !supabase) return [];
     try {
-      const { data: rooms } = await supabase
+      const { data: rooms, error } = await supabase
         .from('rooms')
         .select(`
           *,
@@ -433,7 +503,10 @@ export class SupabaseAdapter {
         `)
         .order('created_at', { ascending: false });
 
-      if (!rooms) return [];
+      if (error || !rooms) {
+        console.error('[Supabase getAllRoomsData Error]:', error);
+        return [];
+      }
 
       return rooms.map((r: any) => {
         const room: Room = {
@@ -489,7 +562,8 @@ export class SupabaseAdapter {
           lastActive: r.updated_at || r.created_at,
         };
       });
-    } catch {
+    } catch (e) {
+      console.error('[Supabase getAllRoomsData Exception]:', e);
       return [];
     }
   }
@@ -500,13 +574,16 @@ export class SupabaseAdapter {
   public async adminClearAllData(): Promise<boolean> {
     if (!this.isAvailable() || !supabase) return false;
     try {
+      console.log('[Supabase] Clearing all data...');
       await supabase.from('submissions').delete().neq('id', '00000000-0000-0000-0000-000000000000');
       await supabase.from('clue_progress').delete().neq('id', '00000000-0000-0000-0000-000000000000');
       await supabase.from('puzzle_progress').delete().neq('id', '00000000-0000-0000-0000-000000000000');
       await supabase.from('room_members').delete().neq('id', '00000000-0000-0000-0000-000000000000');
       await supabase.from('rooms').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      console.log('[Supabase] All data cleared successfully.');
       return true;
-    } catch {
+    } catch (e) {
+      console.error('[Supabase adminClearAllData Exception]:', e);
       return false;
     }
   }

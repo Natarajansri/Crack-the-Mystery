@@ -12,6 +12,7 @@ import {
 import { Participant } from '../types';
 import { gameService } from '../services/gameService';
 import { soundService } from '../services/audioService';
+import { ensureUUID } from '../utils/answerUtils';
 
 interface EntryHubProps {
   onRoomEntered: (roomId: string, participant: Participant) => void;
@@ -63,7 +64,7 @@ export const EntryHub: React.FC<EntryHubProps> = ({ onRoomEntered, onOpenEventMo
     }
 
     const participant: Participant = {
-      id: existingParticipant?.id || `part-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      id: ensureUUID(existingParticipant?.id),
       name: name.trim(),
       email: email.trim(),
       registerNumber: registerNumber.trim().toUpperCase(),

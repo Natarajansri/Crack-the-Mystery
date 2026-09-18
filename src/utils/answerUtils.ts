@@ -16,3 +16,29 @@ export function generateRoomCode(): string {
   }
   return result;
 }
+
+// Standard RFC4122 v4 UUID generator (compatible with PostgreSQL UUID columns)
+export function generateUUID(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+// Check if a string is a valid UUID
+export function isValidUUID(str?: string | null): boolean {
+  if (!str) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(str);
+}
+
+// Ensure an ID is a valid UUID (generates a new UUID if invalid)
+export function ensureUUID(id?: string | null): string {
+  if (id && isValidUUID(id)) {
+    return id;
+  }
+  return generateUUID();
+}

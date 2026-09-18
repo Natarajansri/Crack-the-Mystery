@@ -1,0 +1,78 @@
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500;600;700;800;900&family=Outfit:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-navy-950 text-slate-100 font-body antialiased min-h-screen selection:bg-cyber-cyan/30 selection:text-white;
+    background-image: 
+      radial-gradient(circle at 50% 0%, rgba(0, 240, 255, 0.08) 0%, transparent 60%),
+      radial-gradient(circle at 100% 100%, rgba(157, 78, 221, 0.06) 0%, transparent 50%),
+      radial-gradient(circle at 0% 100%, rgba(13, 242, 201, 0.05) 0%, transparent 50%);
+    background-attachment: fixed;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #0a0f1d;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #1e2d4d;
+    border-radius: 4px;
+    border: 1px solid rgba(0, 240, 255, 0.2);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #2a3e68;
+    border-color: rgba(0, 240, 255, 0.5);
+  }
+}
+
+/* Cyber card glassmorphism */
+.cyber-card {
+  background: rgba(14, 22, 41, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(0, 240, 255, 0.15);
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.7);
+}
+
+.cyber-card-gold {
+  background: rgba(20, 26, 38, 0.85);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 209, 92, 0.25);
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.7), 0 0 20px -8px rgba(255, 209, 92, 0.2);
+}
+
+.cyber-card-purple {
+  background: rgba(20, 18, 40, 0.85);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(157, 78, 221, 0.3);
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.7), 0 0 20px -8px rgba(157, 78, 221, 0.2);
+}
+
+/* Neon glow text */
+.glow-text-cyan {
+  text-shadow: 0 0 12px rgba(0, 240, 255, 0.6);
+}
+
+.glow-text-gold {
+  text-shadow: 0 0 12px rgba(255, 209, 92, 0.6);
+}
+
+.glow-text-purple {
+  text-shadow: 0 0 12px rgba(157, 78, 221, 0.6);
+}
+
+/* Subtle grid overlay */
+.cyber-grid-bg {
+  background-size: 40px 40px;
+  background-image: 
+    linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+}

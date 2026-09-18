@@ -12,7 +12,7 @@ export interface Participant {
   createdAt: string;
 }
 
-export type RoomStatus = 'lobby' | 'in_progress' | 'completed' | 'locked';
+export type RoomStatus = 'lobby' | 'in_progress' | 'completed' | 'locked' | 'eliminated';
 
 export interface Room {
   id: string;

@@ -4,6 +4,7 @@ import {
   Room, 
   RoomMember, 
   RoomState, 
+  RoomStatus,
   ClueProgress, 
   PuzzleProgress, 
   AnswerSubmission 
@@ -584,6 +585,46 @@ export class SupabaseAdapter {
     } catch (e) {
       console.error('[Supabase getAllRoomsData Exception]:', e);
       return [];
+    }
+  }
+
+  /**
+   * Update Room Status (e.g. locked, eliminated, in_progress)
+   */
+  public async updateRoomStatus(roomId: string, status: RoomStatus): Promise<boolean> {
+    if (!this.isAvailable() || !supabase) return false;
+    try {
+      const { error } = await supabase
+        .from('rooms')
+        .update({ status, updated_at: new Date().toISOString() })
+        .eq('id', roomId);
+
+      if (error) {
+        console.error('[Supabase updateRoomStatus Error]:', error);
+        return false;
+      }
+      return true;
+    } catch (e) {
+      console.error('[Supabase updateRoomStatus Exception]:', e);
+      return false;
+    }
+  }
+
+  /**
+   * Delete a single room
+   */
+  public async deleteRoom(roomId: string): Promise<boolean> {
+    if (!this.isAvailable() || !supabase) return false;
+    try {
+      await supabase.from('submissions').delete().eq('room_id', roomId);
+      await supabase.from('clue_progress').delete().eq('room_id', roomId);
+      await supabase.from('puzzle_progress').delete().eq('room_id', roomId);
+      await supabase.from('room_members').delete().eq('room_id', roomId);
+      const { error } = await supabase.from('rooms').delete().eq('id', roomId);
+      return !error;
+    } catch (e) {
+      console.error('[Supabase deleteRoom Exception]:', e);
+      return false;
     }
   }
 

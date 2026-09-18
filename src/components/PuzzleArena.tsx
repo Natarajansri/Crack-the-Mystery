@@ -12,7 +12,9 @@ import {
   Flame,
   Check,
   Zap,
-  Info
+  Info,
+  AlertTriangle,
+  UserX
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { RoomState, Participant, Puzzle, Clue } from '../types';
@@ -202,6 +204,19 @@ export const PuzzleArena: React.FC<PuzzleArenaProps> = ({
           />
         </div>
       </div>
+
+      {/* Team Eliminated Notice */}
+      {room.status === 'eliminated' && (
+        <div className="p-4 rounded-2xl bg-rose-950/90 border-2 border-rose-500/70 text-center space-y-2 shadow-[0_0_30px_rgba(244,63,94,0.3)] animate-pulse">
+          <div className="flex items-center justify-center gap-2 text-rose-300 font-black font-display uppercase text-sm sm:text-base">
+            <UserX className="w-5 h-5 text-rose-400" />
+            <span>Team Eliminated from Active Competition</span>
+          </div>
+          <p className="text-xs text-rose-200 font-sans max-w-xl mx-auto">
+            This room has been eliminated or disqualified by the event administration. Puzzle answer submissions are currently restricted. Please contact the CSE / IE(I) committee coordinators for assistance.
+          </p>
+        </div>
+      )}
 
       {/* Interactive 15-Puzzle Level Selector (Grouped by Tiers) */}
       <div className="cyber-card rounded-2xl p-4 sm:p-5">
@@ -421,25 +436,30 @@ export const PuzzleArena: React.FC<PuzzleArenaProps> = ({
                     <input
                       type="text"
                       required
+                      disabled={room.status === 'eliminated'}
                       placeholder={
-                        activeClueNumber === 5
-                          ? 'Enter the combined master key...'
-                          : 'Enter your answer / deduction...'
+                        room.status === 'eliminated'
+                          ? 'Team eliminated - submissions disabled'
+                          : activeClueNumber === 5
+                            ? 'Enter the combined master key...'
+                            : 'Enter your answer / deduction...'
                       }
                       value={inputAnswer}
                       onChange={(e) => setInputAnswer(e.target.value)}
-                      className="w-full px-4 py-2.5 rounded-xl bg-navy-950 border border-slate-700 text-white font-sans text-sm focus:outline-none focus:border-cyber-cyan placeholder-slate-500"
+                      className={`w-full px-4 py-2.5 rounded-xl bg-navy-950 border border-slate-700 text-white font-sans text-sm focus:outline-none focus:border-cyber-cyan placeholder-slate-500 ${
+                        room.status === 'eliminated' ? 'cursor-not-allowed opacity-60' : ''
+                      }`}
                     />
                   </div>
 
                   <button
                     type="submit"
-                    disabled={isSubmitting || !inputAnswer.trim()}
+                    disabled={isSubmitting || !inputAnswer.trim() || room.status === 'eliminated'}
                     className={`px-5 sm:px-6 py-2.5 rounded-xl font-bold font-display uppercase tracking-wider text-xs sm:text-sm text-navy-950 flex items-center gap-1.5 transition-all ${
                       activeClueNumber === 5
                         ? 'bg-gradient-to-r from-amber-400 to-cyber-gold hover:brightness-110 shadow-glow-gold'
                         : 'bg-gradient-to-r from-cyan-400 to-teal-300 hover:brightness-110 shadow-glow-cyan'
-                    } ${isSubmitting || !inputAnswer.trim() ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    } ${isSubmitting || !inputAnswer.trim() || room.status === 'eliminated' ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
                     <Send className="w-4 h-4" />
                     <span>{isSubmitting ? 'Verifying...' : 'Submit'}</span>

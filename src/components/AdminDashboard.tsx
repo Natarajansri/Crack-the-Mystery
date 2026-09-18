@@ -23,7 +23,10 @@ import {
   Award,
   Crown,
   Clock,
-  Sparkles
+  Sparkles,
+  UserX,
+  UserCheck,
+  UserMinus
 } from 'lucide-react';
 import { gameService } from '../services/gameService';
 import { soundService } from '../services/audioService';
@@ -58,12 +61,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExit }) => {
 
   // Filters & Search
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'lobby' | 'in_progress' | 'completed' | 'locked'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'lobby' | 'in_progress' | 'completed' | 'locked' | 'eliminated'>('all');
   const [sortBy, setSortBy] = useState<'progress' | 'recent' | 'team'>('progress');
 
-  // Room Inspector Modal
+  // Room Inspector & Elimination Modals
   const [selectedRoomState, setSelectedRoomState] = useState<RoomState | null>(null);
   const [resetConfirmRoomId, setResetConfirmRoomId] = useState<string | null>(null);
+  const [eliminateConfirmRoom, setEliminateConfirmRoom] = useState<{ id: string; teamName: string; isEliminated: boolean } | null>(null);
   const [showClearAllModal, setShowClearAllModal] = useState<boolean>(false);
 
   const refreshData = async () => {
@@ -800,13 +804,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExit }) => {
 
                           <td className="py-3 px-4">
                             <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
-                              item.room.status === 'completed'
-                                ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/40'
-                                : item.room.status === 'in_progress'
-                                  ? 'bg-cyber-cyan/15 text-cyber-cyan border-cyber-cyan/40'
-                                  : item.room.status === 'locked'
-                                    ? 'bg-rose-500/15 text-rose-400 border-rose-500/40'
-                                    : 'bg-slate-800 text-slate-300 border-slate-700'
+                              item.room.status === 'eliminated'
+                                ? 'bg-rose-600/25 text-rose-300 border-rose-500/60 shadow-[0_0_10px_rgba(244,63,94,0.3)] font-black'
+                                : item.room.status === 'completed'
+                                  ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/40'
+                                  : item.room.status === 'in_progress'
+                                    ? 'bg-cyber-cyan/15 text-cyber-cyan border-cyber-cyan/40'
+                                    : item.room.status === 'locked'
+                                      ? 'bg-rose-500/15 text-rose-400 border-rose-500/40'
+                                      : 'bg-slate-800 text-slate-300 border-slate-700'
                             }`}>
                               {item.room.status.replace('_', ' ')}
                             </span>
@@ -839,6 +845,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExit }) => {
                                 {item.room.status === 'locked' ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
                               </button>
 
+                              {/* Eliminate / Reinstate Team */}
+                              <button
+                                onClick={() => {
+                                  soundService.playClick();
+                                  setEliminateConfirmRoom({
+                                    id: item.room.id,
+                                    teamName: item.room.teamName,
+                                    isEliminated: item.room.status === 'eliminated'
+                                  });
+                                }}
+                                className={`p-1.5 rounded-lg border transition-colors ${
+                                  item.room.status === 'eliminated'
+                                    ? 'bg-rose-600/30 text-rose-300 border-rose-500 hover:bg-rose-600/50'
+                                    : 'bg-navy-800 hover:bg-rose-950/60 text-slate-400 hover:text-rose-400 border-slate-700 hover:border-rose-500/40'
+                                }`}
+                                title={item.room.status === 'eliminated' ? 'Reinstate / Restore Team' : 'Eliminate / Disqualify Team'}
+                              >
+                                {item.room.status === 'eliminated' ? (
+                                  <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
+                                ) : (
+                                  <UserX className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+
                               {/* Reset Room with confirmation */}
                               <button
                                 onClick={() => {
@@ -849,6 +879,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExit }) => {
                                 title="Reset Room Progress"
                               >
                                 <RotateCcw className="w-3.5 h-3.5" />
+                              </button>
+
+                              {/* Delete Room */}
+                              <button
+                                onClick={() => {
+                                  soundService.playError();
+                                  if (window.confirm(`Permanently delete room "${item.room.teamName}" (${item.room.code})?`)) {
+                                    gameService.adminDeleteRoom(item.room.id);
+                                    refreshData();
+                                  }
+                                }}
+                                className="p-1.5 rounded-lg bg-navy-800 hover:bg-rose-950 text-slate-500 hover:text-rose-400 border border-slate-700"
+                                title="Delete Room"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
                               </button>
                             </div>
                           </td>
@@ -1046,6 +1091,57 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExit }) => {
                 className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold font-display uppercase"
               >
                 Confirm Reset
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CONFIRM ELIMINATE / REINSTATE DIALOG */}
+      {eliminateConfirmRoom && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm">
+          <div className="w-full max-w-md bg-navy-900 border border-rose-500/60 rounded-2xl p-6 text-center space-y-4 shadow-2xl">
+            <div className="w-12 h-12 rounded-2xl bg-rose-500/20 border border-rose-500/40 text-rose-400 flex items-center justify-center mx-auto shadow-[0_0_20px_rgba(244,63,94,0.3)]">
+              {eliminateConfirmRoom.isEliminated ? (
+                <UserCheck className="w-6 h-6 text-emerald-400" />
+              ) : (
+                <UserX className="w-6 h-6" />
+              )}
+            </div>
+            
+            <h3 className="text-base font-bold font-display uppercase text-white">
+              {eliminateConfirmRoom.isEliminated ? 'Reinstate / Restore Team?' : 'Eliminate Team from Event?'}
+            </h3>
+            
+            <p className="text-xs text-slate-300">
+              {eliminateConfirmRoom.isEliminated ? (
+                <>Restore team <strong className="text-white">"{eliminateConfirmRoom.teamName}"</strong> back to active competition?</>
+              ) : (
+                <>Are you sure you want to eliminate team <strong className="text-white">"{eliminateConfirmRoom.teamName}"</strong>? Their room status will become <span className="text-rose-400 font-bold">ELIMINATED</span>, further puzzle submissions will be blocked, and they will be removed from top podium placement.</>
+              )}
+            </p>
+            
+            <div className="flex items-center justify-center gap-3 pt-2">
+              <button
+                onClick={() => setEliminateConfirmRoom(null)}
+                className="px-4 py-2 rounded-xl bg-navy-800 text-slate-300 text-xs font-semibold"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  soundService.playClick();
+                  gameService.adminEliminateRoom(eliminateConfirmRoom.id, !eliminateConfirmRoom.isEliminated);
+                  setEliminateConfirmRoom(null);
+                  refreshData();
+                }}
+                className={`px-4 py-2 rounded-xl text-white text-xs font-bold font-display uppercase tracking-wider ${
+                  eliminateConfirmRoom.isEliminated 
+                    ? 'bg-emerald-600 hover:bg-emerald-500' 
+                    : 'bg-rose-600 hover:bg-rose-500'
+                }`}
+              >
+                {eliminateConfirmRoom.isEliminated ? 'Confirm Reinstate' : 'Confirm Eliminate'}
               </button>
             </div>
           </div>

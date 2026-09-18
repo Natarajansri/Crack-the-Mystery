@@ -521,6 +521,10 @@ class GameService {
       return { success: false, message: 'This room is currently locked by the administrator.' };
     }
 
+    if (state.room.status === 'eliminated') {
+      return { success: false, message: 'This team has been eliminated from the competition by the administrator.' };
+    }
+
     // Locate puzzle and clue
     const puzzle = PUZZLES_DATA.find((p) => p.id === puzzleId);
     if (!puzzle) {
@@ -642,6 +646,10 @@ class GameService {
 
     if (room.status === 'locked') {
       return { success: false, message: 'This room is locked by the administrator.' };
+    }
+
+    if (room.status === 'eliminated') {
+      return { success: false, message: 'This team has been eliminated from the competition by the administrator.' };
     }
 
     const puzzle = PUZZLES_DATA.find((p) => p.id === puzzleId);
@@ -915,8 +923,14 @@ class GameService {
       };
     });
 
-    // Rank: Finished teams sorted by earliest finishedAt, then in-progress by puzzles/clues/activity
+    // Rank: Active Finished teams first, then Active in-progress, then Eliminated teams at bottom
     rawList.sort((a, b) => {
+      const aElim = a.room.status === 'eliminated';
+      const bElim = b.room.status === 'eliminated';
+
+      if (aElim && !bElim) return 1;
+      if (!aElim && bElim) return -1;
+
       const aFin = !!a.isFinished;
       const bFin = !!b.isFinished;
 
@@ -945,7 +959,7 @@ class GameService {
 
     return rawList.map((item, index) => ({
       ...item,
-      rank: index + 1,
+      rank: item.room.status === 'eliminated' ? undefined : index + 1,
     }));
   }
 
@@ -967,7 +981,54 @@ class GameService {
     this.saveStoredRooms(rooms);
     this.saveRoomStates(states);
 
+    if (supabaseAdapter.isAvailable()) {
+      supabaseAdapter.updateRoomStatus(roomId, room.status).catch((e) => console.warn('Supabase lock status sync warning:', e));
+    }
+
     this.broadcastUpdate(roomId, state);
+    return true;
+  }
+
+  public adminEliminateRoom(roomId: string, eliminate: boolean): boolean {
+    const rooms = this.loadStoredRooms();
+    const states = this.loadRoomStates();
+    const room = rooms[roomId];
+    const state = states[roomId];
+
+    if (!room || !state) return false;
+
+    room.status = eliminate ? 'eliminated' : (state.members.length > 0 ? 'in_progress' : 'lobby');
+    room.updatedAt = new Date().toISOString();
+    state.room.status = room.status;
+    state.room.updatedAt = room.updatedAt;
+
+    rooms[roomId] = room;
+    states[roomId] = state;
+    this.saveStoredRooms(rooms);
+    this.saveRoomStates(states);
+
+    if (supabaseAdapter.isAvailable()) {
+      supabaseAdapter.updateRoomStatus(roomId, room.status).catch((e) => console.warn('Supabase eliminate sync warning:', e));
+    }
+
+    this.broadcastUpdate(roomId, state);
+    return true;
+  }
+
+  public adminDeleteRoom(roomId: string): boolean {
+    const rooms = this.loadStoredRooms();
+    const states = this.loadRoomStates();
+
+    delete rooms[roomId];
+    delete states[roomId];
+
+    this.saveStoredRooms(rooms);
+    this.saveRoomStates(states);
+
+    if (supabaseAdapter.isAvailable()) {
+      supabaseAdapter.deleteRoom(roomId).catch((e) => console.warn('Supabase delete room warning:', e));
+    }
+
     return true;
   }
 

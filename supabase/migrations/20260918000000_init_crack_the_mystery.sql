@@ -308,7 +308,30 @@ CREATE POLICY "Public read for active rooms" ON public.rooms FOR SELECT USING (t
 CREATE POLICY "Public read for members" ON public.room_members FOR SELECT USING (true);
 CREATE POLICY "Public read for clue progress" ON public.clue_progress FOR SELECT USING (true);
 CREATE POLICY "Public read for puzzle progress" ON public.puzzle_progress FOR SELECT USING (true);
-CREATE POLICY "Participants read self" ON public.participants FOR SELECT USING (true);
+CREATE POLICY "Public read for participants" ON public.participants FOR SELECT USING (true);
+CREATE POLICY "Public read for submissions" ON public.submissions FOR SELECT USING (true);
+
+-- Write policies for anonymous participants
+CREATE POLICY "Public insert for participants" ON public.participants FOR INSERT WITH CHECK (true);
+CREATE POLICY "Public update for participants" ON public.participants FOR UPDATE USING (true);
+
+CREATE POLICY "Public insert for rooms" ON public.rooms FOR INSERT WITH CHECK (true);
+CREATE POLICY "Public update for rooms" ON public.rooms FOR UPDATE USING (true);
+CREATE POLICY "Public delete for rooms" ON public.rooms FOR DELETE USING (true);
+
+CREATE POLICY "Public insert for room_members" ON public.room_members FOR INSERT WITH CHECK (true);
+CREATE POLICY "Public update for room_members" ON public.room_members FOR UPDATE USING (true);
+CREATE POLICY "Public delete for room_members" ON public.room_members FOR DELETE USING (true);
+
+CREATE POLICY "Public insert for clue_progress" ON public.clue_progress FOR INSERT WITH CHECK (true);
+CREATE POLICY "Public update for clue_progress" ON public.clue_progress FOR UPDATE USING (true);
+CREATE POLICY "Public delete for clue_progress" ON public.clue_progress FOR DELETE USING (true);
+
+CREATE POLICY "Public insert for puzzle_progress" ON public.puzzle_progress FOR INSERT WITH CHECK (true);
+CREATE POLICY "Public update for puzzle_progress" ON public.puzzle_progress FOR UPDATE USING (true);
+CREATE POLICY "Public delete for puzzle_progress" ON public.puzzle_progress FOR DELETE USING (true);
+
+CREATE POLICY "Public insert for submissions" ON public.submissions FOR INSERT WITH CHECK (true);
 
 -- Enable Supabase Realtime publication
 ALTER PUBLICATION supabase_realtime ADD TABLE public.rooms;

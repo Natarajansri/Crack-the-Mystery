@@ -12,6 +12,9 @@ import {
 import { Participant, Room } from '../types';
 import { soundService } from '../services/audioService';
 
+import { isSupabaseConfigured } from '../services/supabase';
+import { Database } from 'lucide-react';
+
 interface HeaderProps {
   participant: Participant | null;
   room: Room | null;
@@ -19,6 +22,7 @@ interface HeaderProps {
   onToggleAdmin: () => void;
   onLeaveRoom: () => void;
   onShowCredits: () => void;
+  onOpenDatabaseModal: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -27,7 +31,8 @@ export const Header: React.FC<HeaderProps> = ({
   isAdminView,
   onToggleAdmin,
   onLeaveRoom,
-  onShowCredits
+  onShowCredits,
+  onOpenDatabaseModal
 }) => {
   const [isMuted, setIsMuted] = useState(soundService.getMuted());
 
@@ -126,6 +131,20 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <Sparkles className="w-3.5 h-3.5" />
             <span>Event Info</span>
+          </button>
+
+          {/* Database Setup Button */}
+          <button
+            onClick={onOpenDatabaseModal}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              isSupabaseConfigured
+                ? 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                : 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30'
+            }`}
+            title="Configure Cloud Database Connection"
+          >
+            <Database className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">{isSupabaseConfigured ? 'DB Online' : 'Connect DB'}</span>
           </button>
 
           {/* Admin Toggle */}

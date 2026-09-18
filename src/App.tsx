@@ -6,6 +6,7 @@ import { PuzzleArena } from './components/PuzzleArena';
 import { AdminDashboard } from './components/AdminDashboard';
 import { EventModal } from './components/EventModal';
 import { VictoryModal } from './components/VictoryModal';
+import { DatabaseModal } from './components/DatabaseModal';
 import { Participant, RoomState } from './types';
 import { gameService } from './services/gameService';
 import { soundService } from './services/audioService';
@@ -23,6 +24,7 @@ export function App() {
   const [isAdminView, setIsAdminView] = useState<boolean>(false);
   const [showEventModal, setShowEventModal] = useState<boolean>(false);
   const [showVictoryModal, setShowVictoryModal] = useState<boolean>(false);
+  const [showDatabaseModal, setShowDatabaseModal] = useState<boolean>(false);
 
   // Subscribe to room updates in real-time
   useEffect(() => {
@@ -95,6 +97,10 @@ export function App() {
           soundService.playClick();
           setShowEventModal(true);
         }}
+        onOpenDatabaseModal={() => {
+          soundService.playClick();
+          setShowDatabaseModal(true);
+        }}
       />
 
       {/* Main Content Area */}
@@ -135,6 +141,12 @@ export function App() {
           </div>
         </div>
       </footer>
+
+      {/* Database Setup & Cloud Credentials Modal */}
+      <DatabaseModal
+        isOpen={showDatabaseModal}
+        onClose={() => setShowDatabaseModal(false)}
+      />
 
       {/* Event Info & Coordinators Modal */}
       <EventModal

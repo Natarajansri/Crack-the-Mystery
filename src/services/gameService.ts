@@ -11,6 +11,7 @@ import {
 import { PUZZLES_DATA } from '../data/puzzlesData';
 import { normalizeAnswer, generateRoomCode } from '../utils/answerUtils';
 import { cloudSync } from './cloudSync';
+import { supabaseAdapter } from './supabaseAdapter';
 
 const STORAGE_KEY_ROOMS = 'mystery_rooms_store';
 const STORAGE_KEY_STATES = 'mystery_room_states_store';
@@ -176,11 +177,27 @@ class GameService {
       callback(state);
     }
 
-    // Start background cloud sync polling for this room
-    this.startCloudPolling(roomId);
+    let unsubSupa: (() => void) | null = null;
+    if (supabaseAdapter.isAvailable()) {
+      unsubSupa = supabaseAdapter.subscribeToRoom(roomId, (remoteState) => {
+        const rooms = this.loadStoredRooms();
+        rooms[roomId] = remoteState.room;
+        this.saveStoredRooms(rooms);
+
+        const states = this.loadRoomStates();
+        states[roomId] = remoteState;
+        this.saveRoomStates(states);
+
+        this.notifyListeners(roomId, remoteState);
+      });
+    } else {
+      // Start background cloud sync polling for this room
+      this.startCloudPolling(roomId);
+    }
 
     // Return unsubscribe function
     return () => {
+      if (unsubSupa) unsubSupa();
       const set = this.stateListeners.get(roomId);
       if (set) {
         set.delete(callback);
@@ -232,6 +249,27 @@ class GameService {
     leader: Participant, 
     maxCapacity: number = 3
   ): Promise<{ room: Room; state: RoomState }> {
+    // 1. If Supabase is connected, use Supabase for real-time multiplayer
+    if (supabaseAdapter.isAvailable()) {
+      try {
+        const supaRes = await supabaseAdapter.createRoom(teamName, leader, maxCapacity);
+        if (supaRes) {
+          const rooms = this.loadStoredRooms();
+          rooms[supaRes.room.id] = supaRes.room;
+          this.saveStoredRooms(rooms);
+
+          const states = this.loadRoomStates();
+          states[supaRes.room.id] = supaRes.state;
+          this.saveRoomStates(states);
+
+          this.broadcastUpdate(supaRes.room.id, supaRes.state);
+          return supaRes;
+        }
+      } catch (e) {
+        console.warn('Supabase createRoom fallback to local:', e);
+      }
+    }
+
     const code = generateRoomCode();
     const roomId = `room-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
     const now = new Date().toISOString();
@@ -287,6 +325,30 @@ class GameService {
     participant: Participant
   ): Promise<{ success: boolean; room?: Room; state?: RoomState; error?: string }> {
     const cleanCode = roomCode.trim().toUpperCase();
+
+    // 1. If Supabase is connected, join directly via Supabase
+    if (supabaseAdapter.isAvailable()) {
+      try {
+        const supaRes = await supabaseAdapter.joinRoom(cleanCode, participant);
+        if (supaRes.success && supaRes.room && supaRes.state) {
+          const rooms = this.loadStoredRooms();
+          rooms[supaRes.room.id] = supaRes.room;
+          this.saveStoredRooms(rooms);
+
+          const states = this.loadRoomStates();
+          states[supaRes.room.id] = supaRes.state;
+          this.saveRoomStates(states);
+
+          this.broadcastUpdate(supaRes.room.id, supaRes.state);
+          return supaRes;
+        } else if (!supaRes.success) {
+          return supaRes;
+        }
+      } catch (e) {
+        console.warn('Supabase joinRoom error:', e);
+      }
+    }
+
     const rooms = this.loadStoredRooms();
     const states = this.loadRoomStates();
 
@@ -376,6 +438,9 @@ class GameService {
   }
 
   public updateMemberStatus(roomId: string, participantId: string, isOnline: boolean, isReady?: boolean) {
+    if (supabaseAdapter.isAvailable()) {
+      supabaseAdapter.updateMemberStatus(roomId, participantId, isOnline, isReady);
+    }
     const states = this.loadRoomStates();
     const state = states[roomId];
     if (!state) return;
@@ -394,6 +459,9 @@ class GameService {
   }
 
   public startRoomChallenge(roomId: string, requesterParticipantId: string): { success: boolean; error?: string } {
+    if (supabaseAdapter.isAvailable()) {
+      supabaseAdapter.startRoomChallenge(roomId);
+    }
     const states = this.loadRoomStates();
     const rooms = this.loadStoredRooms();
     const state = states[roomId];
@@ -689,6 +757,34 @@ class GameService {
   // ADMIN MONITORING & MANAGEMENT
   // ==========================================
   public async syncAllRoomsFromCloud(): Promise<void> {
+    if (supabaseAdapter.isAvailable()) {
+      try {
+        const supaRoomsData = await supabaseAdapter.getAllRoomsData();
+        const localRooms = this.loadStoredRooms();
+        const localStates = this.loadRoomStates();
+        for (const rd of supaRoomsData) {
+          localRooms[rd.room.id] = rd.room;
+          if (!localStates[rd.room.id]) {
+            localStates[rd.room.id] = {
+              room: rd.room,
+              members: rd.members,
+              clueProgress: {},
+              puzzleProgress: {},
+              submissions: [],
+            };
+          } else {
+            localStates[rd.room.id].room = rd.room;
+            localStates[rd.room.id].members = rd.members;
+          }
+        }
+        this.saveStoredRooms(localRooms);
+        this.saveRoomStates(localStates);
+      } catch (e) {
+        console.warn('Supabase syncAllRooms error:', e);
+      }
+      return;
+    }
+
     try {
       const cloudRoomsMap = await cloudSync.fetchAllRooms();
       const localRooms = this.loadStoredRooms();
@@ -872,7 +968,11 @@ class GameService {
   public adminClearAllData(): boolean {
     try {
       this.clearLocalDataOnly();
-      cloudSync.clearAllCloudData().catch((e) => console.warn('Cloud clear warning:', e));
+      if (supabaseAdapter.isAvailable()) {
+        supabaseAdapter.adminClearAllData().catch((e) => console.warn('Supabase clear warning:', e));
+      } else {
+        cloudSync.clearAllCloudData().catch((e) => console.warn('Cloud clear warning:', e));
+      }
 
       if (syncChannel) {
         syncChannel.postMessage({ type: 'ALL_DATA_CLEARED' });

@@ -293,5 +293,25 @@ describe('Crack The Mystery - Core Logic Tests', () => {
       expect(gameService.getAdminStats().totalRooms).toBe(0);
       expect(gameService.getAdminStats().totalParticipants).toBe(0);
     });
+
+    it('enforces maximum 3 members per room for 60 participant capacity', async () => {
+      const { room } = await gameService.createRoom('Team Trident', dummyLeader, 3);
+      expect(room.maxCapacity).toBe(3);
+
+      const m2: Participant = { ...dummyMember, id: 'm2', name: 'Member 2' };
+      const m3: Participant = { ...dummyMember, id: 'm3', name: 'Member 3' };
+      const m4: Participant = { ...dummyMember, id: 'm4', name: 'Member 4' };
+
+      const j2 = await gameService.joinRoom(room.code, m2);
+      expect(j2.success).toBe(true);
+
+      const j3 = await gameService.joinRoom(room.code, m3);
+      expect(j3.success).toBe(true);
+
+      // 4th member must be rejected
+      const j4 = await gameService.joinRoom(room.code, m4);
+      expect(j4.success).toBe(false);
+      expect(j4.error).toContain('Room is full');
+    });
   });
 });

@@ -60,7 +60,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExit }) => {
   const [resetConfirmRoomId, setResetConfirmRoomId] = useState<string | null>(null);
   const [showClearAllModal, setShowClearAllModal] = useState<boolean>(false);
 
-  const refreshData = () => {
+  const refreshData = async () => {
+    try {
+      await gameService.syncAllRoomsFromCloud();
+    } catch {
+      // ignore
+    }
     setRoomsData(gameService.getAllRoomsData());
     setStats(gameService.getAdminStats());
   };
@@ -68,8 +73,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExit }) => {
   useEffect(() => {
     if (isAuthenticated) {
       refreshData();
-      // Auto-poll every 4 seconds for realtime admin monitoring
-      const interval = setInterval(refreshData, 4000);
+      // Auto-poll every 3 seconds for realtime admin monitoring across all 60 participants
+      const interval = setInterval(refreshData, 3000);
       return () => clearInterval(interval);
     }
   }, [isAuthenticated]);

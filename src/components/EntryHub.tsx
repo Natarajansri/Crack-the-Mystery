@@ -21,7 +21,10 @@ interface EntryHubProps {
 export const EntryHub: React.FC<EntryHubProps> = ({ onRoomEntered, onOpenEventModal }) => {
   const existingParticipant = gameService.getCurrentParticipant();
 
-  const [mode, setMode] = useState<'create' | 'join'>('create');
+  const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+  const initialCode = urlParams?.get('code')?.trim().toUpperCase() || '';
+
+  const [mode, setMode] = useState<'create' | 'join'>(initialCode ? 'join' : 'create');
   const [name, setName] = useState(existingParticipant?.name || '');
   const [email, setEmail] = useState(existingParticipant?.email || '');
   const [registerNumber, setRegisterNumber] = useState(existingParticipant?.registerNumber || '');
@@ -33,7 +36,7 @@ export const EntryHub: React.FC<EntryHubProps> = ({ onRoomEntered, onOpenEventMo
   const [maxCapacity, setMaxCapacity] = useState<number>(3);
 
   // Join Room fields
-  const [roomCode, setRoomCode] = useState('');
+  const [roomCode, setRoomCode] = useState(initialCode);
 
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);

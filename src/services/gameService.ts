@@ -10,33 +10,40 @@ import {
 } from '../types';
 import { PUZZLES_DATA } from '../data/puzzlesData';
 import { normalizeAnswer, generateRoomCode } from '../utils/answerUtils';
-import { supabase, isSupabaseConfigured } from './supabase';
+import { cloudSync } from './cloudSync';
 
 const STORAGE_KEY_ROOMS = 'mystery_rooms_store';
 const STORAGE_KEY_STATES = 'mystery_room_states_store';
 const STORAGE_KEY_PARTICIPANTS = 'mystery_participants_store';
 
-// Cross-tab broadcast channel for real-time multiplayer simulation when not on Supabase
+// Cross-tab broadcast channel for real-time multiplayer simulation
 const syncChannel = typeof window !== 'undefined' && 'BroadcastChannel' in window
   ? new BroadcastChannel('crack_the_mystery_realtime_sync')
   : null;
 
 class GameService {
   private stateListeners: Map<string, Set<(state: RoomState) => void>> = new Map();
+  private pollIntervals: Map<string, any> = new Map();
+  private isSyncingMap: Map<string, boolean> = new Map();
 
   constructor() {
     if (syncChannel) {
       syncChannel.onmessage = (event) => {
         const { type, roomId, state } = event.data;
         if (type === 'ROOM_STATE_UPDATED' && roomId && state) {
+          const states = this.loadRoomStates();
+          states[roomId] = state;
+          this.saveRoomStates(states);
           this.notifyListeners(roomId, state);
+        } else if (type === 'ALL_DATA_CLEARED') {
+          this.clearLocalDataOnly();
         }
       };
     }
   }
 
   // Helper to load all stored rooms
-  private loadStoredRooms(): Record<string, Room> {
+  public loadStoredRooms(): Record<string, Room> {
     try {
       const data = localStorage.getItem(STORAGE_KEY_ROOMS);
       return data ? JSON.parse(data) : {};
@@ -45,7 +52,7 @@ class GameService {
     }
   }
 
-  private saveStoredRooms(rooms: Record<string, Room>) {
+  public saveStoredRooms(rooms: Record<string, Room>) {
     try {
       localStorage.setItem(STORAGE_KEY_ROOMS, JSON.stringify(rooms));
     } catch (e) {
@@ -54,7 +61,7 @@ class GameService {
   }
 
   // Helper to load room state
-  private loadRoomStates(): Record<string, RoomState> {
+  public loadRoomStates(): Record<string, RoomState> {
     try {
       const data = localStorage.getItem(STORAGE_KEY_STATES);
       return data ? JSON.parse(data) : {};
@@ -63,7 +70,7 @@ class GameService {
     }
   }
 
-  private saveRoomStates(states: Record<string, RoomState>) {
+  public saveRoomStates(states: Record<string, RoomState>) {
     try {
       localStorage.setItem(STORAGE_KEY_STATES, JSON.stringify(states));
     } catch (e) {
@@ -83,6 +90,77 @@ class GameService {
     if (syncChannel) {
       syncChannel.postMessage({ type: 'ROOM_STATE_UPDATED', roomId, state });
     }
+    // Asynchronously push update to Cloud Relay and Netlify Function
+    cloudSync.saveRoomState(state).catch((e) => console.warn('Cloud sync push error:', e));
+  }
+
+  // Start polling cloud for a room's state (multiplayer sync across devices)
+  private startCloudPolling(roomId: string) {
+    if (this.pollIntervals.has(roomId)) return;
+
+    const poll = async () => {
+      if (this.isSyncingMap.get(roomId)) return;
+      this.isSyncingMap.set(roomId, true);
+
+      try {
+        const localStates = this.loadRoomStates();
+        const localState = localStates[roomId];
+        const code = localState?.room?.code;
+
+        const remoteState = await cloudSync.fetchRoomById(roomId, code);
+        if (remoteState && remoteState.room) {
+          const remoteTime = new Date(remoteState.room.updatedAt || remoteState.room.createdAt || 0).getTime();
+          const localTime = localState ? new Date(localState.room.updatedAt || localState.room.createdAt || 0).getTime() : 0;
+
+          // Check if remote state has new updates or if local state is missing
+          const remoteMembersCount = remoteState.members?.length || 0;
+          const localMembersCount = localState?.members?.length || 0;
+          const remoteSubsCount = remoteState.submissions?.length || 0;
+          const localSubsCount = localState?.submissions?.length || 0;
+
+          const hasChanges = !localState ||
+            remoteTime > localTime ||
+            remoteMembersCount !== localMembersCount ||
+            remoteSubsCount !== localSubsCount ||
+            remoteState.room.status !== localState.room.status ||
+            remoteState.room.currentPuzzleNumber !== localState.room.currentPuzzleNumber ||
+            JSON.stringify(remoteState.clueProgress) !== JSON.stringify(localState.clueProgress);
+
+          if (hasChanges) {
+            // Update local store
+            const rooms = this.loadStoredRooms();
+            rooms[roomId] = remoteState.room;
+            this.saveStoredRooms(rooms);
+
+            localStates[roomId] = remoteState;
+            this.saveRoomStates(localStates);
+
+            this.notifyListeners(roomId, remoteState);
+          }
+        }
+      } catch (err) {
+        // quiet error to prevent console spamming
+      } finally {
+        this.isSyncingMap.set(roomId, false);
+      }
+    };
+
+    // Initial fetch
+    poll();
+
+    // Poll every 2000ms with randomized jitter (1800ms - 2200ms) to avoid thundering herd across 60 participants
+    const jitter = Math.floor(Math.random() * 400) - 200;
+    const intervalTime = Math.max(1500, 2000 + jitter);
+    const timerId = setInterval(poll, intervalTime);
+    this.pollIntervals.set(roomId, timerId as any);
+  }
+
+  private stopCloudPolling(roomId: string) {
+    const timerId = this.pollIntervals.get(roomId);
+    if (timerId) {
+      clearInterval(timerId as any);
+      this.pollIntervals.delete(roomId);
+    }
   }
 
   // Subscribe to real-time updates for a specific room
@@ -92,11 +170,14 @@ class GameService {
     }
     this.stateListeners.get(roomId)!.add(callback);
 
-    // Initial state trigger
+    // Initial state trigger from local store
     const state = this.getRoomState(roomId);
     if (state) {
       callback(state);
     }
+
+    // Start background cloud sync polling for this room
+    this.startCloudPolling(roomId);
 
     // Return unsubscribe function
     return () => {
@@ -105,6 +186,7 @@ class GameService {
         set.delete(callback);
         if (set.size === 0) {
           this.stateListeners.delete(roomId);
+          this.stopCloudPolling(roomId);
         }
       }
     };
@@ -143,7 +225,7 @@ class GameService {
   }
 
   // ==========================================
-  // ROOM CREATION & JOINING
+  // ROOM CREATION & JOINING (CLOUD + LOCAL)
   // ==========================================
   public async createRoom(
     teamName: string, 
@@ -184,6 +266,7 @@ class GameService {
       submissions: [],
     };
 
+    // Save locally
     const rooms = this.loadStoredRooms();
     rooms[roomId] = room;
     this.saveStoredRooms(rooms);
@@ -192,7 +275,10 @@ class GameService {
     states[roomId] = state;
     this.saveRoomStates(states);
 
+    // Broadcast & Push to Cloud
     this.broadcastUpdate(roomId, state);
+    this.startCloudPolling(roomId);
+
     return { room, state };
   }
 
@@ -204,9 +290,31 @@ class GameService {
     const rooms = this.loadStoredRooms();
     const states = this.loadRoomStates();
 
-    // Find room with matching code
-    const foundRoom = Object.values(rooms).find((r) => r.code === cleanCode);
-    if (!foundRoom) {
+    // 1. First check local store
+    let foundRoom = Object.values(rooms).find((r) => r.code === cleanCode);
+    let state = foundRoom ? states[foundRoom.id] : null;
+
+    // 2. If not found locally, fetch from Cloud (crucial for cross-device support for 60 participants)
+    if (!foundRoom || !state) {
+      try {
+        const cloudState = await cloudSync.fetchRoomByCode(cleanCode);
+        if (cloudState && cloudState.room) {
+          foundRoom = cloudState.room;
+          state = cloudState;
+
+          // Cache locally
+          rooms[foundRoom.id] = foundRoom;
+          this.saveStoredRooms(rooms);
+
+          states[foundRoom.id] = state;
+          this.saveRoomStates(states);
+        }
+      } catch (err) {
+        console.warn('Error fetching room from cloud:', err);
+      }
+    }
+
+    if (!foundRoom || !state) {
       return { success: false, error: 'Room code not found. Please check and try again.' };
     }
 
@@ -214,22 +322,19 @@ class GameService {
       return { success: false, error: 'This room is currently locked by the administrator.' };
     }
 
-    const state = states[foundRoom.id];
-    if (!state) {
-      return { success: false, error: 'Room state could not be loaded.' };
-    }
-
     // Check if participant is already a member (rejoining)
     const existingIndex = state.members.findIndex((m) => m.participantId === participant.id);
     if (existingIndex >= 0) {
       state.members[existingIndex].isOnline = true;
+      state.room.updatedAt = new Date().toISOString();
       states[foundRoom.id] = state;
       this.saveRoomStates(states);
       this.broadcastUpdate(foundRoom.id, state);
+      this.startCloudPolling(foundRoom.id);
       return { success: true, room: foundRoom, state };
     }
 
-    // Check capacity
+    // Check capacity (capped at max 3 members)
     if (state.members.length >= foundRoom.maxCapacity) {
       return { 
         success: false, 
@@ -249,10 +354,19 @@ class GameService {
     };
 
     state.members.push(newMember);
+    state.room.updatedAt = new Date().toISOString();
+    foundRoom.updatedAt = state.room.updatedAt;
+
+    rooms[foundRoom.id] = foundRoom;
+    this.saveStoredRooms(rooms);
+
     states[foundRoom.id] = state;
     this.saveRoomStates(states);
 
+    // Broadcast and push to Cloud
     this.broadcastUpdate(foundRoom.id, state);
+    this.startCloudPolling(foundRoom.id);
+
     return { success: true, room: foundRoom, state };
   }
 
@@ -272,6 +386,7 @@ class GameService {
       if (typeof isReady === 'boolean') {
         member.isReady = isReady;
       }
+      state.room.updatedAt = new Date().toISOString();
       states[roomId] = state;
       this.saveRoomStates(states);
       this.broadcastUpdate(roomId, state);
@@ -389,10 +504,12 @@ class GameService {
       timestamp: new Date().toISOString(),
     };
     state.submissions.push(submission);
+    state.room.updatedAt = new Date().toISOString();
 
     if (!isCorrect) {
       states[roomId] = state;
       this.saveRoomStates(states);
+      this.broadcastUpdate(roomId, state);
       return { 
         success: false, 
         message: 'Incorrect answer. Read the prompt carefully and recheck your deduction!' 
@@ -496,10 +613,13 @@ class GameService {
       timestamp: new Date().toISOString(),
     };
     state.submissions.push(submission);
+    room.updatedAt = new Date().toISOString();
+    state.room.updatedAt = room.updatedAt;
 
     if (!isCorrect) {
       states[roomId] = state;
       this.saveRoomStates(states);
+      this.broadcastUpdate(roomId, state);
       return {
         success: false,
         message: 'Incorrect final combination. Review the fragment sequence in your vault!',
@@ -568,6 +688,37 @@ class GameService {
   // ==========================================
   // ADMIN MONITORING & MANAGEMENT
   // ==========================================
+  public async syncAllRoomsFromCloud(): Promise<void> {
+    try {
+      const cloudRoomsMap = await cloudSync.fetchAllRooms();
+      const localRooms = this.loadStoredRooms();
+      const localStates = this.loadRoomStates();
+      let hasNew = false;
+
+      for (const [code, meta] of Object.entries(cloudRoomsMap)) {
+        const roomId = meta.roomId;
+        if (!roomId) continue;
+
+        // If not in local rooms or updated remotely, sync state
+        if (!localRooms[roomId] || (meta.updatedAt && (!localRooms[roomId].updatedAt || meta.updatedAt > localRooms[roomId].updatedAt))) {
+          const remoteState = await cloudSync.fetchRoomByCode(code);
+          if (remoteState && remoteState.room) {
+            localRooms[roomId] = remoteState.room;
+            localStates[roomId] = remoteState;
+            hasNew = true;
+          }
+        }
+      }
+
+      if (hasNew) {
+        this.saveStoredRooms(localRooms);
+        this.saveRoomStates(localStates);
+      }
+    } catch (e) {
+      console.warn('Failed to sync all rooms from cloud:', e);
+    }
+  }
+
   public getAdminStats(): AdminStats {
     const rooms = Object.values(this.loadStoredRooms());
     const states = this.loadRoomStates();
@@ -640,7 +791,9 @@ class GameService {
     if (!room || !state) return false;
 
     room.status = lock ? 'locked' : (state.members.length > 0 ? 'in_progress' : 'lobby');
+    room.updatedAt = new Date().toISOString();
     state.room.status = room.status;
+    state.room.updatedAt = room.updatedAt;
 
     rooms[roomId] = room;
     states[roomId] = state;
@@ -661,6 +814,7 @@ class GameService {
 
     room.status = 'in_progress';
     room.currentPuzzleNumber = 1;
+    room.updatedAt = new Date().toISOString();
     state.room = room;
     state.clueProgress = {};
     state.puzzleProgress = {};
@@ -704,14 +858,22 @@ class GameService {
     return [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
   }
 
+  private clearLocalDataOnly() {
+    localStorage.removeItem(STORAGE_KEY_ROOMS);
+    localStorage.removeItem(STORAGE_KEY_STATES);
+    localStorage.removeItem(STORAGE_KEY_PARTICIPANTS);
+    localStorage.removeItem('mystery_active_room_id');
+    localStorage.removeItem('mystery_current_participant');
+    this.stateListeners.clear();
+    this.pollIntervals.forEach((timer) => clearInterval(timer));
+    this.pollIntervals.clear();
+  }
+
   public adminClearAllData(): boolean {
     try {
-      localStorage.removeItem(STORAGE_KEY_ROOMS);
-      localStorage.removeItem(STORAGE_KEY_STATES);
-      localStorage.removeItem(STORAGE_KEY_PARTICIPANTS);
-      localStorage.removeItem('mystery_active_room_id');
-      localStorage.removeItem('mystery_current_participant');
-      this.stateListeners.clear();
+      this.clearLocalDataOnly();
+      cloudSync.clearAllCloudData().catch((e) => console.warn('Cloud clear warning:', e));
+
       if (syncChannel) {
         syncChannel.postMessage({ type: 'ALL_DATA_CLEARED' });
       }

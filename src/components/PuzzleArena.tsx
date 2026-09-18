@@ -370,15 +370,10 @@ export const PuzzleArena: React.FC<PuzzleArenaProps> = ({
             </div>
 
             {/* Clue Prompt */}
-            <div className="p-4 rounded-xl bg-navy-950/90 border border-slate-800/80 mb-4 space-y-2">
+            <div className="p-4 rounded-xl bg-navy-950/90 border border-slate-800/80 mb-4">
               <p className="text-sm sm:text-base text-slate-100 font-sans leading-relaxed whitespace-pre-line">
                 {activeClue.prompt}
               </p>
-              {activeClue.subPrompt && (
-                <p className="text-xs text-cyber-teal font-medium">
-                  {activeClue.subPrompt}
-                </p>
-              )}
             </div>
 
             {/* Solved Status or Submission Form */}
